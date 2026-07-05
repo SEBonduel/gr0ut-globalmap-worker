@@ -18,6 +18,7 @@ const CDN = "https://eu-wotp.wgcdn.co/dcont/fb/image";
 const MAP_OVERRIDES = { "34_redshire": `${CDN}/redshire.png`, "23_westfeld": `${CDN}/westfield.png` };
 const LEAD_MIN = 15;   // minutes : plancher bas (manches de tournoi tardives)
 const LEAD_MAX = 90;
+const REMIND_WINDOW = 8; // rappel de dernière minute : bataille démarrant dans 0-8 min
 const ROLE = {
   Attaque: { emoji: "⚔️", color: 0xE74C3C },
   Défense: { emoji: "🛡️", color: 0x3498DB },
@@ -166,25 +167,30 @@ async function runNotify(env) {
     } else { changed = true; log.provinces = "baseline"; }
   } catch (e) { log.provinces = "front indispo"; }
 
-  // 2) Batailles à venir (fenêtre LEAD_MIN..LEAD_MAX)
+  // 2) Batailles : notif ~1h avant + rappel de dernière minute
   let battles = [];
   try { battles = await collectBattles(env); } catch (e) { battles = []; }
   log.battles = battles.length;
+  log.reminded = 0;
   const now = Date.now();
-  const due = battles.filter((b) => b.start >= now + LEAD_MIN * 60000 && b.start <= now + LEAD_MAX * 60000);
+  const notified = new Set(state.notified || []);
+  const ping = env.CW_ROLE_ID ? `<@&${env.CW_ROLE_ID}>` : "@here";
+  const mentions = env.CW_ROLE_ID ? { roles: [env.CW_ROLE_ID] } : { parse: ["everyone"] };
+  const groupBySlot = (list) => {
+    const g = {};
+    for (const b of list) (g[slot(b.start).key] = g[slot(b.start).key] || []).push(b);
+    return g;
+  };
 
+  // 2a) Notif à l'avance (LEAD_MIN..LEAD_MAX)
+  const due = battles.filter((b) => b.start >= now + LEAD_MIN * 60000 && b.start <= now + LEAD_MAX * 60000);
   if (due.length) {
-    const notified = new Set(state.notified || []);
     const tags = await clanTags(env, due.flatMap((b) => b.opponents));
-    const groups = {};
-    for (const b of due) (groups[slot(b.start).key] = groups[slot(b.start).key] || []).push(b);
-    for (const [key, group] of Object.entries(groups)) {
+    for (const [key, group] of Object.entries(groupBySlot(due))) {
       if (notified.has(key)) continue;
       for (const b of group) b.image = await mapImage(b.arenaId);
       const embeds = group.sort((a, b) => (a.arenaName || "").localeCompare(b.arenaName || "")).map((b) => buildEmbed(b, tags));
       const heure = slot(group[0].start).heure;
-      const ping = env.CW_ROLE_ID ? `<@&${env.CW_ROLE_ID}>` : "@here";
-      const mentions = env.CW_ROLE_ID ? { roles: [env.CW_ROLE_ID] } : { parse: ["everyone"] };
       for (let i = 0; i < embeds.length; i += 10) {
         await post(webhook, {
           content: i === 0 ? `${ping} 🎯 **${group.length} bataille(s)** à **${heure}** — présentez-vous !` : "",
@@ -194,9 +200,25 @@ async function runNotify(env) {
       }
       notified.add(key); changed = true; log.posted++;
     }
-    const cutoff = slot(now - 7 * 86400000).date;
-    state.notified = [...notified].filter((k) => k.split("#")[0] >= cutoff);
   }
+
+  // 2b) Rappel de dernière minute (~5 min avant le début)
+  const soon = battles.filter((b) => b.start >= now && b.start <= now + REMIND_WINDOW * 60000);
+  for (const [key, group] of Object.entries(groupBySlot(soon))) {
+    const rkey = `${key}#go`;
+    if (notified.has(rkey)) continue;
+    const min = Math.max(1, Math.round((group[0].start - now) / 60000));
+    const maps = group.map((b) => `**${b.arenaName}** (${b.provinceName})`).join(" · ");
+    await post(webhook, {
+      content: `${ping} ⏰ **Ça démarre dans ~${min} min !** ${maps} — à vos chars ! 🔥`,
+      allowed_mentions: mentions,
+    });
+    notified.add(rkey); changed = true; log.reminded++;
+  }
+
+  // Purge des clés > 7 jours.
+  const cutoff = slot(now - 7 * 86400000).date;
+  state.notified = [...notified].filter((k) => k.split("#")[0] >= cutoff);
 
   if (changed) await kv.put("state", JSON.stringify(state));
   return log;
