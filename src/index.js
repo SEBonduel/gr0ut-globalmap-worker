@@ -314,6 +314,12 @@ export default {
       const log = await runNotify(env);
       return new Response(JSON.stringify(log), { headers: { "content-type": "application/json" } });
     }
+    if (url.pathname === "/status") {
+      if (url.searchParams.get("key") !== env.RUN_SECRET)
+        return new Response("Forbidden", { status: 403 });
+      const state = await env.STATE.get("state", "json");
+      return new Response(JSON.stringify(state?.session || {}), { headers: { "content-type": "application/json" } });
+    }
     return new Response("GR0UT globalmap notifier OK", { status: 200 });
   },
   async scheduled(event, env, ctx) {
