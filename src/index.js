@@ -116,6 +116,16 @@ async function ownedProvinces(env) {
   return owned;
 }
 
+// Stats Carte Globale du clan (saison) : sert à calculer le bilan V/D du soir.
+async function clanGmStats(env) {
+  const fronts = await activeFronts(env);
+  if (!fronts.length) return null;
+  const d = await wgGet(env, "wot/globalmap/claninfo", { clan_id: env.CLAN_ID, front_id: fronts[0] });
+  const c = d?.[env.CLAN_ID] || {};
+  const st = c.statistics || {}, r = c.ratings || {};
+  return { wins: st.wins || 0, losses: st.losses || 0, battles: st.battles || 0, elo10: r.elo_10 || 0 };
+}
+
 // --- Discord -----------------------------------------------------------------
 
 async function post(webhook, body) {
@@ -158,7 +168,9 @@ async function runNotify(env) {
   // Session du soir (pour le récap de fin de soirée). Réinitialisée chaque jour.
   const today = slot(now).date;
   if (!state.session || state.session.date !== today) {
-    state.session = { date: today, battles: {}, gained: [], lost: [], recapPosted: false };
+    let startStats = null;
+    try { startStats = await clanGmStats(env); } catch (e) { /* front indispo */ }
+    state.session = { date: today, battles: {}, gained: [], lost: [], recapPosted: false, startStats };
     changed = true;
   }
   const session = state.session;
@@ -257,12 +269,25 @@ async function runNotify(env) {
   if (bKeys.length && !hasUpcoming && !session.recapPosted && maxStart && now - maxStart > 30 * 60000) {
     const list = bKeys.map((k) => session.battles[k]).sort((a, b) => a.start - b.start)
       .map((x) => `• ${x.heure} — ${x.maps.join(", ")}`).join("\n");
+    // Bilan V/D de la soirée = delta des compteurs saison (fiable même si la
+    // liste des maps est partielle).
+    let bilan = "";
+    try {
+      const end = await clanGmStats(env), s = session.startStats;
+      if (end && s) {
+        const dW = end.wins - s.wins, dL = end.losses - s.losses;
+        const dB = end.battles - s.battles, dE = end.elo10 - s.elo10;
+        if (dB > 0) bilan = `\n\n**Bilan : ${dW} victoire(s) / ${dL} défaite(s)**`
+          + (dE ? ` · ELO T10 ${dE >= 0 ? "+" : ""}${dE}` : "");
+      }
+    } catch (e) { /* claninfo indispo */ }
     const prov = [];
     if (session.gained.length) prov.push(`🏆 Provinces prises : ${session.gained.join(", ")}`);
     if (session.lost.length) prov.push(`💔 Provinces perdues : ${session.lost.join(", ")}`);
     await post(webhook, {
       content: `🌙 **Soirée Carte Globale terminée — récap GR0UT**\n\n`
-        + `**${bKeys.length} bataille(s) jouée(s) :**\n${list}`
+        + `**${bKeys.length} bataille(s) suivie(s) :**\n${list}`
+        + bilan
         + (prov.length ? `\n\n${prov.join("\n")}` : "")
         + `\n\nGG à tous ! 🎮`,
       allowed_mentions: { parse: [] },
