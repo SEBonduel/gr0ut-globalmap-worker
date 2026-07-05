@@ -18,7 +18,7 @@ const CDN = "https://eu-wotp.wgcdn.co/dcont/fb/image";
 const MAP_OVERRIDES = { "34_redshire": `${CDN}/redshire.png`, "23_westfeld": `${CDN}/westfield.png` };
 const LEAD_MIN = 15;   // minutes : plancher bas (manches de tournoi tardives)
 const LEAD_MAX = 90;
-const REMIND_WINDOW = 8; // rappel de dernière minute : bataille démarrant dans 0-8 min
+const REMIND_WINDOW = 12; // rappel de dernière minute : bataille démarrant dans 0-12 min
 const ROLE = {
   Attaque: { emoji: "⚔️", color: 0xE74C3C },
   Défense: { emoji: "🛡️", color: 0x3498DB },
@@ -152,7 +152,16 @@ async function runNotify(env) {
   const state = (await kv.get("state", "json")) || { notified: [], owned: null };
   const webhook = env.DISCORD_WEBHOOK_URL;
   let changed = false;
+  const now = Date.now();
   const log = { provinces: "skip", battles: 0, posted: 0 };
+
+  // Session du soir (pour le récap de fin de soirée). Réinitialisée chaque jour.
+  const today = slot(now).date;
+  if (!state.session || state.session.date !== today) {
+    state.session = { date: today, battles: {}, gained: [], lost: [], recapPosted: false };
+    changed = true;
+  }
+  const session = state.session;
 
   // 1) Provinces gagnées / perdues
   try {
@@ -161,8 +170,18 @@ async function runNotify(env) {
     state.owned = current;
     if (prev) {
       const P = new Set(Object.keys(prev)), C = new Set(Object.keys(current));
-      for (const id of C) if (!P.has(id)) { await post(webhook, { content: `🏆 **GR0UT a pris ${current[id].name}** (${current[id].arena}) ! 🎉` }); changed = true; }
-      for (const id of P) if (!C.has(id)) { await post(webhook, { content: `💔 GR0UT a perdu **${prev[id].name}** (${prev[id].arena}).` }); changed = true; }
+      for (const id of C) if (!P.has(id)) {
+        const label = `${current[id].name} (${current[id].arena})`;
+        await post(webhook, { content: `🏆 **GR0UT a pris ${current[id].name}** (${current[id].arena}) ! 🎉` });
+        if (!session.gained.includes(label)) session.gained.push(label);
+        changed = true;
+      }
+      for (const id of P) if (!C.has(id)) {
+        const label = `${prev[id].name} (${prev[id].arena})`;
+        await post(webhook, { content: `💔 GR0UT a perdu **${prev[id].name}** (${prev[id].arena}).` });
+        if (!session.lost.includes(label)) session.lost.push(label);
+        changed = true;
+      }
       log.provinces = "ok";
     } else { changed = true; log.provinces = "baseline"; }
   } catch (e) { log.provinces = "front indispo"; }
@@ -172,8 +191,22 @@ async function runNotify(env) {
   try { battles = await collectBattles(env); } catch (e) { battles = []; }
   log.battles = battles.length;
   log.reminded = 0;
-  const now = Date.now();
   const notified = new Set(state.notified || []);
+
+  // Mémorise les batailles du jour pour le récap.
+  for (const b of battles) {
+    const s = slot(b.start);
+    if (s.date !== today) continue;
+    if (!session.battles[s.key]) {
+      session.battles[s.key] = { heure: s.heure, start: b.start, maps: [] };
+      changed = true;
+    }
+    const label = `${b.arenaName} (${b.provinceName})`;
+    if (!session.battles[s.key].maps.includes(label)) {
+      session.battles[s.key].maps.push(label);
+      changed = true;
+    }
+  }
   const ping = env.CW_ROLE_ID ? `<@&${env.CW_ROLE_ID}>` : "@here";
   const mentions = env.CW_ROLE_ID ? { roles: [env.CW_ROLE_ID] } : { parse: ["everyone"] };
   const groupBySlot = (list) => {
@@ -214,6 +247,27 @@ async function runNotify(env) {
       allowed_mentions: mentions,
     });
     notified.add(rkey); changed = true; log.reminded++;
+  }
+
+  // 2c) Récap de fin de soirée : plus aucune bataille à venir + la dernière
+  // remonte à > 30 min -> on poste le bilan (une seule fois par soirée).
+  const bKeys = Object.keys(session.battles);
+  const hasUpcoming = battles.some((b) => b.start > now);
+  const maxStart = bKeys.length ? Math.max(...bKeys.map((k) => session.battles[k].start)) : 0;
+  if (bKeys.length && !hasUpcoming && !session.recapPosted && maxStart && now - maxStart > 30 * 60000) {
+    const list = bKeys.map((k) => session.battles[k]).sort((a, b) => a.start - b.start)
+      .map((x) => `• ${x.heure} — ${x.maps.join(", ")}`).join("\n");
+    const prov = [];
+    if (session.gained.length) prov.push(`🏆 Provinces prises : ${session.gained.join(", ")}`);
+    if (session.lost.length) prov.push(`💔 Provinces perdues : ${session.lost.join(", ")}`);
+    await post(webhook, {
+      content: `🌙 **Soirée Carte Globale terminée — récap GR0UT**\n\n`
+        + `**${bKeys.length} bataille(s) jouée(s) :**\n${list}`
+        + (prov.length ? `\n\n${prov.join("\n")}` : "")
+        + `\n\nGG à tous ! 🎮`,
+      allowed_mentions: { parse: [] },
+    });
+    session.recapPosted = true; changed = true; log.recap = true;
   }
 
   // Purge des clés > 7 jours.
