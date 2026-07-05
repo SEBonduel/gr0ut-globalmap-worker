@@ -1,0 +1,18 @@
+name = "gr0ut-globalmap"
+main = "src/index.js"
+compatibility_date = "2024-09-23"
+workers_dev = true
+
+# État (anti-doublon + provinces). Créé via : wrangler kv namespace create STATE
+[[kv_namespaces]]
+binding = "STATE"
+id = "3cd2da71a8cd4a549f1e5abc63e6ed42"
+
+# Cron FIABLE toutes les 5 min sur la plage du soir (UTC). 12-23 UTC = 14h-01h Paris.
+[triggers]
+crons = ["*/5 12-23 * * *"]
+
+[vars]
+CLAN_ID = "500165786"
+CW_ROLE_ID = "1411354662325588018"
+# Secrets : WG_APP_ID, DISCORD_WEBHOOK_URL, RUN_SECRET (wrangler secret put ...)
