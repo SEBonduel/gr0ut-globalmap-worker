@@ -282,10 +282,10 @@ async function runNotify(env) {
     const min = Math.max(1, Math.round((group[0].start - now) / 60000));
     const maps = group.map((b) => `**${b.arenaName}** (${b.provinceName})`).join(" · ");
     const content = total >= 2
-      ? `🚨 ${ping} **URGENT — ${total} BATAILLES dans ~${min} min !**\n`
+      ? `🚨 **URGENT — ${total} BATAILLES dans ~${min} min !**\n`
         + `👉 **${total} compos à remplir (~${total * 15} joueurs)**, ramenez du monde ! 🔥\n${maps}`
-      : `${ping} ⏰ **Ça démarre dans ~${min} min !** ${maps} — à vos chars ! 🔥`;
-    await post(webhook, { content, allowed_mentions: mentions });
+      : `⏰ **Ça démarre dans ~${min} min !** ${maps} — à vos chars ! 🔥`;
+    await post(webhook, { content, allowed_mentions: { parse: [] } });
     group.forEach((b) => notified.add(`${bkey(b)}#go`));
     changed = true; log.reminded++;
   }
