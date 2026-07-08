@@ -282,8 +282,8 @@ async function runNotify(env) {
       }
     } catch (e) { /* claninfo indispo */ }
     const prov = [];
-    if (session.gained.length) prov.push(`🏆 **Provinces prises :**\n${session.gained.map((p) => `• ${p}`).join("\n")}`);
-    if (session.lost.length) prov.push(`💔 **Provinces perdues :**\n${session.lost.map((p) => `• ${p}`).join("\n")}`);
+    if (session.gained.length) prov.push(`🏆 **Provinces prises (${session.gained.length}) :**\n${session.gained.map((p) => `• ${p}`).join("\n")}`);
+    if (session.lost.length) prov.push(`💔 **Provinces perdues (${session.lost.length}) :**\n${session.lost.map((p) => `• ${p}`).join("\n")}`);
     await post(webhook, {
       content: `🌙 **Soirée Carte Globale terminée — récap GR0UT**\n\n`
         + `**${bKeys.length} bataille(s) suivie(s) :**\n${list}`
