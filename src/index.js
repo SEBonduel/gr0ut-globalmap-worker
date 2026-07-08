@@ -91,14 +91,16 @@ async function collectBattles(env) {
       { front_id: front, province_id: [...pids].join(","), limit: 100 });
     for (const p of (data || [])) arena[p.province_id] = [p.arena_id, p.arena_name];
   }
-  return raw.map((b) => {
+  // Un "bye" (tour passé quand le nombre d'adversaires est impair) n'a pas
+  // d'adversaire (competitor_id vide) : ce n'est PAS une bataille jouée, on l'ignore.
+  return raw.filter((b) => b.competitor_id).map((b) => {
     const [aid, aname] = arena[b.province_id] || [null, null];
     return {
       provinceId: b.province_id, provinceName: b.province_name,
       arenaId: aid, arenaName: aname || b.province_name,
       start: b.time * 1000,
       role: { attack: "Attaque", defense: "Défense" }[b.type] || "Bataille",
-      opponents: b.competitor_id ? [b.competitor_id] : [],
+      opponents: [b.competitor_id],
     };
   });
 }
@@ -269,6 +271,7 @@ async function runNotify(env) {
   if (bKeys.length && !hasUpcoming && !session.recapPosted && maxStart && now - maxStart > 30 * 60000) {
     const list = bKeys.map((k) => session.battles[k]).sort((a, b) => a.start - b.start)
       .map((x) => `• ${x.heure} — ${x.maps.join(", ")}`).join("\n");
+    const nbBattles = bKeys.reduce((n, k) => n + session.battles[k].maps.length, 0);
     // Bilan V/D de la soirée = delta des compteurs saison (fiable même si la
     // liste des maps est partielle).
     let bilan = "";
@@ -286,7 +289,7 @@ async function runNotify(env) {
     if (session.lost.length) prov.push(`💔 **Provinces perdues (${session.lost.length}) :**\n${session.lost.map((p) => `• ${p}`).join("\n")}`);
     await post(webhook, {
       content: `🌙 **Soirée Carte Globale terminée — récap GR0UT**\n\n`
-        + `**${bKeys.length} bataille(s) suivie(s) :**\n${list}`
+        + `**${nbBattles} bataille(s) jouée(s) :**\n${list}`
         + bilan
         + (prov.length ? `\n\n${prov.join("\n")}` : "")
         + `\n\nGG à tous ! 🎮`,
