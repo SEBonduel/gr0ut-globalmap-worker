@@ -259,7 +259,7 @@ async function runNotify(env) {
       const embeds = shown.sort((a, b) => (a.arenaName || "").localeCompare(b.arenaName || "")).map((b) => buildEmbed(b, tags));
       const content = urgent
         ? `🚨 ${ping} **URGENT — ${total} BATAILLES EN MÊME TEMPS à ${heure} !**\n`
-          + `👉 **${total} compos à remplir (~${total * 15} joueurs)** — ramenez du monde, faut du monde ! 🔥`
+          + `👉 **${total} compos à remplir (~${total * 15} joueurs)**, ramenez du monde ! 🔥`
         : `${ping} 🎯 **Bataille à ${heure}** — présentez-vous !`;
       for (let i = 0; i < embeds.length; i += 10) {
         await post(webhook, {
@@ -282,7 +282,8 @@ async function runNotify(env) {
     const min = Math.max(1, Math.round((group[0].start - now) / 60000));
     const maps = group.map((b) => `**${b.arenaName}** (${b.provinceName})`).join(" · ");
     const content = total >= 2
-      ? `🚨 ${ping} **URGENT — ${total} BATAILLES dans ~${min} min !** ${total} compos à remplir : ${maps} — vite, du monde ! 🔥`
+      ? `🚨 ${ping} **URGENT — ${total} BATAILLES dans ~${min} min !**\n`
+        + `👉 **${total} compos à remplir (~${total * 15} joueurs)**, ramenez du monde ! 🔥\n${maps}`
       : `${ping} ⏰ **Ça démarre dans ~${min} min !** ${maps} — à vos chars ! 🔥`;
     await post(webhook, { content, allowed_mentions: mentions });
     group.forEach((b) => notified.add(`${bkey(b)}#go`));
