@@ -80,9 +80,20 @@ async function mapImage(arenaId) {
 
 // --- Batailles (clanbattles) -------------------------------------------------
 
+// DEBUG temporaire : accumule les entrées brutes clanbattles du jour (tous
+// champs) pour inspecter la représentation d'un bye. Consultable via /debug.
+async function captureDebug(env, raw) {
+  const today = slot(Date.now()).date;
+  let dbg = await env.STATE.get("debug", "json");
+  if (!dbg || dbg.date !== today) dbg = { date: today, entries: {} };
+  for (const b of raw) dbg.entries[`${b.province_id}#${b.time}`] = b;
+  await env.STATE.put("debug", JSON.stringify(dbg));
+}
+
 async function collectBattles(env) {
   const raw = await wgGet(env, "wot/globalmap/clanbattles", { clan_id: env.CLAN_ID });
   if (!raw || !raw.length) return [];
+  try { await captureDebug(env, raw); } catch (e) { /* debug best-effort */ }
   const byFront = {};
   for (const b of raw) (byFront[b.front_id] = byFront[b.front_id] || new Set()).add(b.province_id);
   const arena = {};
@@ -322,6 +333,12 @@ export default {
         return new Response("Forbidden", { status: 403 });
       const state = await env.STATE.get("state", "json");
       return new Response(JSON.stringify(state?.session || {}), { headers: { "content-type": "application/json" } });
+    }
+    if (url.pathname === "/debug") {
+      if (url.searchParams.get("key") !== env.RUN_SECRET)
+        return new Response("Forbidden", { status: 403 });
+      const dbg = await env.STATE.get("debug", "json");
+      return new Response(JSON.stringify(dbg || {}), { headers: { "content-type": "application/json" } });
     }
     return new Response("GR0UT globalmap notifier OK", { status: 200 });
   },
