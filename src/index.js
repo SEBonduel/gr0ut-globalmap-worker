@@ -240,38 +240,53 @@ async function runNotify(env) {
     return g;
   };
 
+  // Dédup PAR BATAILLE (province), pas par créneau : sinon une 2e partie qui
+  // apparaît à la même heure après la 1re notif serait ignorée.
+  const bkey = (b) => `${slot(b.start).key}#${b.provinceId}`;
+
   // 2a) Notif à l'avance (LEAD_MIN..LEAD_MAX)
   const due = battles.filter((b) => b.start >= now + LEAD_MIN * 60000 && b.start <= now + LEAD_MAX * 60000);
   if (due.length) {
     const tags = await clanTags(env, due.flatMap((b) => b.opponents));
     for (const [key, group] of Object.entries(groupBySlot(due))) {
-      if (notified.has(key)) continue;
-      for (const b of group) b.image = await mapImage(b.arenaId);
-      const embeds = group.sort((a, b) => (a.arenaName || "").localeCompare(b.arenaName || "")).map((b) => buildEmbed(b, tags));
+      const fresh = group.filter((b) => !notified.has(bkey(b)));
+      if (!fresh.length) continue;
+      const total = group.length;             // total de batailles sur ce créneau
+      const urgent = total >= 2;              // plusieurs compos à remplir en même temps
+      const shown = urgent ? group : fresh;   // en urgence on ré-affiche tout le créneau
       const heure = slot(group[0].start).heure;
+      for (const b of shown) b.image = await mapImage(b.arenaId);
+      const embeds = shown.sort((a, b) => (a.arenaName || "").localeCompare(b.arenaName || "")).map((b) => buildEmbed(b, tags));
+      const content = urgent
+        ? `🚨 ${ping} **URGENT — ${total} BATAILLES EN MÊME TEMPS à ${heure} !**\n`
+          + `👉 **${total} compos à remplir (~${total * 15} joueurs)** — ramenez du monde, faut du monde ! 🔥`
+        : `${ping} 🎯 **Bataille à ${heure}** — présentez-vous !`;
       for (let i = 0; i < embeds.length; i += 10) {
         await post(webhook, {
-          content: i === 0 ? `${ping} 🎯 **${group.length} bataille(s)** à **${heure}** — présentez-vous !` : "",
+          content: i === 0 ? content : "",
           embeds: embeds.slice(i, i + 10),
           allowed_mentions: i === 0 ? mentions : { parse: [] },
         });
       }
-      notified.add(key); changed = true; log.posted++;
+      shown.forEach((b) => notified.add(bkey(b)));
+      changed = true; log.posted++;
     }
   }
 
   // 2b) Rappel de dernière minute (~5 min avant le début)
   const soon = battles.filter((b) => b.start >= now && b.start <= now + REMIND_WINDOW * 60000);
   for (const [key, group] of Object.entries(groupBySlot(soon))) {
-    const rkey = `${key}#go`;
-    if (notified.has(rkey)) continue;
+    const fresh = group.filter((b) => !notified.has(`${bkey(b)}#go`));
+    if (!fresh.length) continue;
+    const total = group.length;
     const min = Math.max(1, Math.round((group[0].start - now) / 60000));
     const maps = group.map((b) => `**${b.arenaName}** (${b.provinceName})`).join(" · ");
-    await post(webhook, {
-      content: `${ping} ⏰ **Ça démarre dans ~${min} min !** ${maps} — à vos chars ! 🔥`,
-      allowed_mentions: mentions,
-    });
-    notified.add(rkey); changed = true; log.reminded++;
+    const content = total >= 2
+      ? `🚨 ${ping} **URGENT — ${total} BATAILLES dans ~${min} min !** ${total} compos à remplir : ${maps} — vite, du monde ! 🔥`
+      : `${ping} ⏰ **Ça démarre dans ~${min} min !** ${maps} — à vos chars ! 🔥`;
+    await post(webhook, { content, allowed_mentions: mentions });
+    group.forEach((b) => notified.add(`${bkey(b)}#go`));
+    changed = true; log.reminded++;
   }
 
   // 2c) Récap de fin de soirée : plus aucune bataille à venir + la dernière
