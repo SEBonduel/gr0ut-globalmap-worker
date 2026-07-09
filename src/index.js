@@ -139,6 +139,46 @@ async function clanGmStats(env) {
   return { wins: st.wins || 0, losses: st.losses || 0, battles: st.battles || 0, elo10: r.elo_10 || 0 };
 }
 
+// --- API publique pour le site vitrine (stats live des 3 clans) --------------
+
+const SITE_CLANS = [
+  { id: 500165786, tag: "GR0UT", role: "Clan principal" },
+  { id: 500135793, tag: "GR0VT", role: "Grout Elite" },
+  { id: 500168264, tag: "GR0UF", role: "Grout Family" },
+];
+
+const emblemUrl = (id) =>
+  `https://eu.wargaming.net/clans/media/clans/emblems/cl_${String(id).slice(-3)}/${id}/emblem_195x195.png`;
+
+async function clansPublic(env) {
+  const ids = SITE_CLANS.map((c) => c.id).join(",");
+  let gm = {}, info = {};
+  try {
+    const fronts = await activeFronts(env);
+    if (fronts.length) gm = await wgGet(env, "wot/globalmap/claninfo", { clan_id: ids, front_id: fronts[0] });
+  } catch (e) { /* globalmap indispo */ }
+  try {
+    info = await wgGet(env, "wgn/clans/info", { clan_id: ids, game: "wot", fields: "members_count,name,tag,color" });
+  } catch (e) { /* wgn indispo */ }
+  return SITE_CLANS.map((c) => {
+    const g = gm?.[c.id]?.statistics || {};
+    const r = gm?.[c.id]?.ratings || {};
+    const i = info?.[c.id] || {};
+    const wins = g.wins || 0, battles = g.battles || 0;
+    return {
+      clan_id: c.id, tag: c.tag, role: c.role,
+      name: i.name || gm?.[c.id]?.name || c.tag,
+      members: i.members_count || null,
+      color: i.color || null,
+      emblem: emblemUrl(c.id),
+      elo10: r.elo_10 || null,
+      wins, battles,
+      winrate: battles ? Math.round((1000 * wins) / battles) / 10 : null,
+      provinces: g.provinces_count ?? null,
+    };
+  });
+}
+
 // --- Discord -----------------------------------------------------------------
 
 async function post(webhook, body) {
@@ -355,6 +395,17 @@ export default {
         return new Response("Forbidden", { status: 403 });
       const dbg = await env.STATE.get("debug", "json");
       return new Response(JSON.stringify(dbg || {}), { headers: { "content-type": "application/json" } });
+    }
+    if (url.pathname === "/api/clans") {
+      let clans = [];
+      try { clans = await clansPublic(env); } catch (e) { clans = []; }
+      return new Response(JSON.stringify({ clans }), {
+        headers: {
+          "content-type": "application/json",
+          "access-control-allow-origin": "*",
+          "cache-control": "public, max-age=300",
+        },
+      });
     }
     return new Response("GR0UT globalmap notifier OK", { status: 200 });
   },
